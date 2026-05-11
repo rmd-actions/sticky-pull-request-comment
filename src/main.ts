@@ -27,6 +27,7 @@ import {
   repo,
   skipUnchanged,
 } from "./config"
+import {validateBody, validateExclusiveModes} from "./validate"
 
 async function run(): Promise<undefined> {
   if (Number.isNaN(pullRequestNumber) || pullRequestNumber < 1) {
@@ -35,6 +36,15 @@ async function run(): Promise<undefined> {
   }
 
   try {
+    validateExclusiveModes(
+      deleteOldComment,
+      recreate,
+      onlyCreateComment,
+      onlyUpdateComment,
+      hideOldComment,
+      hideAndRecreate,
+    )
+
     const body = await getBody()
 
     if (!body && ignoreEmpty) {
@@ -42,36 +52,15 @@ async function run(): Promise<undefined> {
       return
     }
 
-    if (!deleteOldComment && !hideOldComment && !body) {
-      throw new Error("Either message or path input is required")
-    }
-
-    if (deleteOldComment && recreate) {
-      throw new Error("delete and recreate cannot be both set to true")
-    }
-
-    if (onlyCreateComment && onlyUpdateComment) {
-      throw new Error("only_create and only_update cannot be both set to true")
-    }
-
-    if (hideOldComment && hideAndRecreate) {
-      throw new Error("hide and hide_and_recreate cannot be both set to true")
-    }
+    validateBody(body, deleteOldComment, hideOldComment)
 
     const octokit = github.getOctokit(githubToken)
     const previous = await findPreviousComment(octokit, repo, pullRequestNumber, header)
 
     core.setOutput("previous_comment_id", previous?.id)
 
-    if (deleteOldComment) {
-      if (previous) {
-        await deleteComment(octokit, previous.id)
-      }
-      return
-    }
-
     if (!previous) {
-      if (onlyUpdateComment) {
+      if (onlyUpdateComment || hideOldComment || deleteOldComment) {
         return
       }
       const created = await createComment(octokit, repo, pullRequestNumber, body, header)
@@ -87,6 +76,11 @@ async function run(): Promise<undefined> {
 
     if (hideOldComment) {
       await minimizeComment(octokit, previous.id, hideClassify)
+      return
+    }
+
+    if (deleteOldComment) {
+      await deleteComment(octokit, previous.id)
       return
     }
 
